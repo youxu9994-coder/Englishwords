@@ -27,8 +27,9 @@ export interface Book {
   title: string;       // 标题，如"四级核心词汇"
   subTitle: string;    // 副标题，如"乱序版"
   wordCount: number;   // 单词总量
-  category: Category;  // 所属分类
+  category: string;    // 所属分类 (Changed from Category enum to string to support API dynamic values)
   coverColor: string;  // 封面背景色 (Tailwind CSS类名)
+  learnedCount?: number; // 已学习单词数 (来自API)
 }
 
 // 视图状态枚举：用于控制App当前显示的页面/模式

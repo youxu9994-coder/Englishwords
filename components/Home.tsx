@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { Book } from '../types';
 import { BOOKS, CATEGORIES as DEFAULT_CATEGORIES } from '../constants';
 import { BookOpen, Trophy } from 'lucide-react';
-import { fetchCategories, CategoryData } from '../services/api';
+import { fetchCategories, fetchBooksByCategory, CategoryData, BookDetailData } from '../services/api';
 
 interface HomeProps {
   onSelectBook: (book: Book) => void;
@@ -11,13 +11,20 @@ interface HomeProps {
   isLoggedIn: boolean;
 }
 
-const Home: React.FC<HomeProps> = ({ onSelectBook, onRegister, isLoggedIn }) => {
-  // Use string type for activeCategory to support both enum values and API strings
-  const [activeCategory, setActiveCategory] = useState<string>('四级'); 
-  const [categories, setCategories] = useState<CategoryData[]>([]);
-  const [loading, setLoading] = useState(true);
+// 辅助函数：根据ID生成一个固定的封面颜色
+const getCoverColor = (id: number) => {
+    const colors = ['bg-orange-100', 'bg-blue-100', 'bg-green-100', 'bg-red-100', 'bg-purple-100', 'bg-yellow-100'];
+    return colors[id % colors.length];
+};
 
-  // Fetch categories from API on mount
+const Home: React.FC<HomeProps> = ({ onSelectBook, onRegister, isLoggedIn }) => {
+  const [activeCategoryName, setActiveCategoryName] = useState<string>('四级'); 
+  const [categories, setCategories] = useState<CategoryData[]>([]);
+  const [books, setBooks] = useState<Book[]>([]);
+  const [loadingCats, setLoadingCats] = useState(true);
+  const [loadingBooks, setLoadingBooks] = useState(false);
+
+  // 1. Fetch categories on mount
   useEffect(() => {
     const loadCategories = async () => {
       try {
@@ -25,28 +32,63 @@ const Home: React.FC<HomeProps> = ({ onSelectBook, onRegister, isLoggedIn }) => 
         
         if (apiCategories && apiCategories.length > 0) {
           setCategories(apiCategories);
-          
-          // If the currently active category (default '四级') is not in the API list, switch to the first one
-          if (!apiCategories.find(c => c.name === activeCategory)) {
-             setActiveCategory(apiCategories[0].name);
+          // Set default active category to the first one available
+          if (apiCategories.length > 0) {
+             setActiveCategoryName(apiCategories[0].name);
           }
         } else {
-          // Fallback to local constants if API returns empty
-          setCategories(DEFAULT_CATEGORIES.map((c, i) => ({ id: i, name: c })));
+          // Fallback
+          const mockCats = DEFAULT_CATEGORIES.map((c, i) => ({ id: i + 1, name: c }));
+          setCategories(mockCats);
+          setActiveCategoryName(mockCats[0].name);
         }
       } catch (e) {
-        // Fallback on error
-        setCategories(DEFAULT_CATEGORIES.map((c, i) => ({ id: i, name: c })));
+        const mockCats = DEFAULT_CATEGORIES.map((c, i) => ({ id: i + 1, name: c }));
+        setCategories(mockCats);
+        setActiveCategoryName(mockCats[0].name);
       } finally {
-        setLoading(false);
+        setLoadingCats(false);
       }
     };
     loadCategories();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
 
-  // Filter books based on active category
-  // book.category is an Enum value (string), activeCategory is string. Comparison works as expected.
-  const filteredBooks = BOOKS.filter(b => b.category === activeCategory);
+  // 2. Fetch books whenever active category changes
+  useEffect(() => {
+    const loadBooks = async () => {
+        const activeCat = categories.find(c => c.name === activeCategoryName);
+        if (!activeCat) return;
+
+        setLoadingBooks(true);
+        try {
+            const apiBooks = await fetchBooksByCategory(activeCat.id);
+            if (apiBooks && apiBooks.length > 0) {
+                const mappedBooks: Book[] = apiBooks.map(b => ({
+                    id: String(b.bookId),
+                    title: b.bookName,
+                    subTitle: '', // 接口无副标题
+                    wordCount: b.totalWords,
+                    category: activeCategoryName,
+                    coverColor: getCoverColor(b.bookId),
+                    learnedCount: b.learnedWords
+                }));
+                setBooks(mappedBooks);
+            } else {
+                setBooks([]);
+            }
+        } catch (error) {
+            console.error("Failed to load books", error);
+            setBooks([]);
+        } finally {
+            setLoadingBooks(false);
+        }
+    };
+    
+    if (categories.length > 0) {
+        loadBooks();
+    }
+  }, [activeCategoryName, categories]);
+
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-8">
@@ -79,8 +121,7 @@ const Home: React.FC<HomeProps> = ({ onSelectBook, onRegister, isLoggedIn }) => 
 
       {/* 分类切换栏 */}
       <div className="flex overflow-x-auto pb-4 gap-2 mb-6 custom-scroll">
-        {loading ? (
-             // Loading state skeleton
+        {loadingCats ? (
              Array.from({ length: 4 }).map((_, i) => (
                 <div key={i} className="h-10 w-24 bg-gray-100 rounded-full animate-pulse"></div>
              ))
@@ -88,9 +129,9 @@ const Home: React.FC<HomeProps> = ({ onSelectBook, onRegister, isLoggedIn }) => 
             categories.map(cat => (
               <button
                 key={cat.id}
-                onClick={() => setActiveCategory(cat.name)}
+                onClick={() => setActiveCategoryName(cat.name)}
                 className={`px-6 py-2 rounded-full whitespace-nowrap font-medium transition-all ${
-                  activeCategory === cat.name 
+                  activeCategoryName === cat.name 
                     ? 'bg-red-100 text-red-500 shadow-sm border border-red-200' 
                     : 'bg-white text-gray-500 border border-gray-100 hover:bg-gray-50'
                 }`}
@@ -102,43 +143,58 @@ const Home: React.FC<HomeProps> = ({ onSelectBook, onRegister, isLoggedIn }) => 
       </div>
 
       {/* 词书网格列表 */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-        {filteredBooks.length > 0 ? (
-          filteredBooks.map(book => (
-            <div 
-              key={book.id} 
-              onClick={() => onSelectBook(book)}
-              className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm hover:shadow-md cursor-pointer transition-all hover:-translate-y-1 flex gap-4 group"
-            >
-              {/* 封面图标 */}
-              <div className={`w-24 h-32 rounded-lg flex-shrink-0 flex items-center justify-center ${book.coverColor} border-2 border-gray-800 shadow-[3px_3px_0px_0px_rgba(31,41,55,0.1)] group-hover:shadow-[4px_4px_0px_0px_rgba(31,41,55,1)] transition-shadow`}>
-                 <BookOpen className="text-gray-800" size={32} />
-              </div>
-              
-              {/* 词书信息 */}
-              <div className="flex flex-col justify-between py-1">
-                <div>
-                    <h3 className="font-bold text-gray-800 text-lg leading-tight">{book.title}</h3>
-                    <span className="text-xs font-semibold bg-gray-100 text-gray-500 px-2 py-0.5 rounded mt-1 inline-block">
-                        {book.subTitle}
-                    </span>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 min-h-[200px]">
+        {loadingBooks ? (
+             Array.from({ length: 3 }).map((_, i) => (
+                <div key={i} className="bg-white p-4 rounded-2xl h-32 animate-pulse border border-gray-100"></div>
+             ))
+        ) : books.length > 0 ? (
+          books.map(book => {
+            const progress = book.wordCount > 0 && book.learnedCount 
+                ? Math.round((book.learnedCount / book.wordCount) * 100) 
+                : 0;
+
+            return (
+                <div 
+                  key={book.id} 
+                  onClick={() => onSelectBook(book)}
+                  className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm hover:shadow-md cursor-pointer transition-all hover:-translate-y-1 flex gap-4 group"
+                >
+                  {/* 封面图标 */}
+                  <div className={`w-24 h-32 rounded-lg flex-shrink-0 flex items-center justify-center ${book.coverColor} border-2 border-gray-800 shadow-[3px_3px_0px_0px_rgba(31,41,55,0.1)] group-hover:shadow-[4px_4px_0px_0px_rgba(31,41,55,1)] transition-shadow`}>
+                     <BookOpen className="text-gray-800" size={32} />
+                  </div>
+                  
+                  {/* 词书信息 */}
+                  <div className="flex flex-col justify-between py-1 flex-1">
+                    <div>
+                        <h3 className="font-bold text-gray-800 text-lg leading-tight line-clamp-2">{book.title}</h3>
+                        {book.subTitle && (
+                            <span className="text-xs font-semibold bg-gray-100 text-gray-500 px-2 py-0.5 rounded mt-1 inline-block">
+                                {book.subTitle}
+                            </span>
+                        )}
+                    </div>
+                    <div>
+                       <div className="flex items-center text-xs text-yellow-600 bg-yellow-50 px-2 py-1 rounded w-fit mb-2">
+                         <span className="mr-1">{book.wordCount} words</span>
+                       </div>
+                       {/* 进度条 */}
+                       <div className="w-full bg-gray-100 h-1.5 rounded-full overflow-hidden">
+                          <div 
+                            className="h-full bg-blue-500 rounded-full transition-all duration-500"
+                            style={{ width: `${progress}%` }}
+                          ></div>
+                       </div>
+                       <div className="flex justify-between text-xs text-gray-400 mt-1">
+                         <span>Progress</span>
+                         <span>{progress}%</span>
+                       </div>
+                    </div>
+                  </div>
                 </div>
-                <div>
-                   <div className="flex items-center text-xs text-yellow-600 bg-yellow-50 px-2 py-1 rounded w-fit mb-2">
-                     <span className="mr-1">{book.wordCount} words</span>
-                   </div>
-                   {/* 进度条 (Mock) */}
-                   <div className="w-full bg-gray-100 h-1.5 rounded-full">
-                      <div className="w-[0%] h-full bg-blue-500 rounded-full"></div>
-                   </div>
-                   <div className="flex justify-between text-xs text-gray-400 mt-1">
-                     <span>Progress</span>
-                     <span>0%</span>
-                   </div>
-                </div>
-              </div>
-            </div>
-          ))
+            );
+          })
         ) : (
           <div className="col-span-full py-12 text-center text-gray-400">
              <Trophy size={48} className="mx-auto mb-4 opacity-30" />
