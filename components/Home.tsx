@@ -18,13 +18,14 @@ const getCoverColor = (id: number) => {
 };
 
 const Home: React.FC<HomeProps> = ({ onSelectBook, onRegister, isLoggedIn }) => {
-  const [activeCategoryName, setActiveCategoryName] = useState<string>('四级'); 
+  // 使用 ID 来追踪选中的分类，初始为 null
+  const [activeCategoryId, setActiveCategoryId] = useState<number | null>(null); 
   const [categories, setCategories] = useState<CategoryData[]>([]);
   const [books, setBooks] = useState<Book[]>([]);
   const [loadingCats, setLoadingCats] = useState(true);
   const [loadingBooks, setLoadingBooks] = useState(false);
 
-  // 1. Fetch categories on mount
+  // 1. 组件加载时获取分类列表
   useEffect(() => {
     const loadCategories = async () => {
       try {
@@ -32,20 +33,18 @@ const Home: React.FC<HomeProps> = ({ onSelectBook, onRegister, isLoggedIn }) => 
         
         if (apiCategories && apiCategories.length > 0) {
           setCategories(apiCategories);
-          // Set default active category to the first one available
-          if (apiCategories.length > 0) {
-             setActiveCategoryName(apiCategories[0].name);
-          }
+          // 默认选中第一个分类
+          setActiveCategoryId(apiCategories[0].id);
         } else {
-          // Fallback
+          // 降级处理：使用模拟数据
           const mockCats = DEFAULT_CATEGORIES.map((c, i) => ({ id: i + 1, name: c }));
           setCategories(mockCats);
-          setActiveCategoryName(mockCats[0].name);
+          setActiveCategoryId(mockCats[0].id);
         }
       } catch (e) {
         const mockCats = DEFAULT_CATEGORIES.map((c, i) => ({ id: i + 1, name: c }));
         setCategories(mockCats);
-        setActiveCategoryName(mockCats[0].name);
+        setActiveCategoryId(mockCats[0].id);
       } finally {
         setLoadingCats(false);
       }
@@ -53,22 +52,23 @@ const Home: React.FC<HomeProps> = ({ onSelectBook, onRegister, isLoggedIn }) => 
     loadCategories();
   }, []);
 
-  // 2. Fetch books whenever active category changes
+  // 2. 当选中分类ID变化时，获取该分类下的书籍
   useEffect(() => {
     const loadBooks = async () => {
-        const activeCat = categories.find(c => c.name === activeCategoryName);
-        if (!activeCat) return;
+        if (activeCategoryId === null) return;
 
         setLoadingBooks(true);
         try {
-            const apiBooks = await fetchBooksByCategory(activeCat.id);
+            const apiBooks = await fetchBooksByCategory(activeCategoryId);
+            const activeCatName = categories.find(c => c.id === activeCategoryId)?.name || '';
+
             if (apiBooks && apiBooks.length > 0) {
                 const mappedBooks: Book[] = apiBooks.map(b => ({
                     id: String(b.bookId),
                     title: b.bookName,
                     subTitle: '', // 接口无副标题
                     wordCount: b.totalWords,
-                    category: activeCategoryName,
+                    category: activeCatName,
                     coverColor: getCoverColor(b.bookId),
                     learnedCount: b.learnedWords
                 }));
@@ -84,10 +84,11 @@ const Home: React.FC<HomeProps> = ({ onSelectBook, onRegister, isLoggedIn }) => 
         }
     };
     
-    if (categories.length > 0) {
+    // 只有当有分类数据且有选中的分类ID时才加载书籍
+    if (categories.length > 0 && activeCategoryId !== null) {
         loadBooks();
     }
-  }, [activeCategoryName, categories]);
+  }, [activeCategoryId, categories]);
 
 
   return (
@@ -129,9 +130,9 @@ const Home: React.FC<HomeProps> = ({ onSelectBook, onRegister, isLoggedIn }) => 
             categories.map(cat => (
               <button
                 key={cat.id}
-                onClick={() => setActiveCategoryName(cat.name)}
+                onClick={() => setActiveCategoryId(cat.id)}
                 className={`px-6 py-2 rounded-full whitespace-nowrap font-medium transition-all ${
-                  activeCategoryName === cat.name 
+                  activeCategoryId === cat.id 
                     ? 'bg-red-100 text-red-500 shadow-sm border border-red-200' 
                     : 'bg-white text-gray-500 border border-gray-100 hover:bg-gray-50'
                 }`}

@@ -1,7 +1,8 @@
 
 import { CATEGORIES, BOOKS } from '../constants';
 
-export const API_BASE_URL = 'http://localhost:9981';
+// 使用相对路径，以便通过 vite.config.ts 中的代理转发请求
+export const API_BASE_URL = '';
 
 export interface CategoryData {
   id: number;
