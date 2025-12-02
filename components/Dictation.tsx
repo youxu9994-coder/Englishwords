@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { ViewState, Word } from '../types';
 import { HelpCircle, Check, X, Star, RotateCcw, LogOut } from 'lucide-react';
@@ -198,25 +199,30 @@ const Dictation: React.FC<DictationProps> = ({ words, onExit, onSwitchMode }) =>
               ))}
            </div>
 
-           {/* 错题列表 (带收藏功能) */}
+           {/* 单词回顾列表 (包含所有尝试的单词) */}
            <div className="w-full bg-white rounded-[32px] border border-gray-100 shadow-xl shadow-gray-100/50 overflow-hidden mb-8 flex-1 min-h-[200px]">
               <div className="p-6 border-b border-gray-50 bg-gray-50/50 flex justify-between items-center">
-                 <h3 className="font-bold text-gray-800">错题回顾</h3>
-                 <span className="text-xs font-bold text-gray-400 bg-white px-2 py-1 rounded-md border border-gray-100">{attempts.filter(a => !a.isCorrect).length} words</span>
+                 <h3 className="font-bold text-gray-800">单词回顾</h3>
+                 <span className="text-xs font-bold text-gray-400 bg-white px-2 py-1 rounded-md border border-gray-100">{attempts.length} words</span>
               </div>
               
               <div className="divide-y divide-gray-50 max-h-[300px] overflow-y-auto custom-scroll">
-                 {attempts.filter(a => !a.isCorrect).length === 0 ? (
-                   <div className="p-12 text-center text-gray-400 font-medium">Perfect Score! 🎉</div>
+                 {attempts.length === 0 ? (
+                   <div className="p-12 text-center text-gray-400 font-medium">No words attempted yet.</div>
                  ) : (
-                   attempts.filter(a => !a.isCorrect).map((attempt, idx) => {
+                   attempts.map((attempt, idx) => {
                      const word = words.find(w => w.id === attempt.wordId);
                      if (!word) return null;
+                     const isCorrect = attempt.isCorrect;
+                     
                      return (
                        <div key={idx} className="p-5 flex items-center justify-between hover:bg-gray-50 transition-colors group">
                           <div className="flex items-center gap-4">
-                             <div className="w-10 h-10 rounded-2xl bg-red-100 flex items-center justify-center shrink-0 text-red-500 font-bold text-xs">
-                                <X size={18} strokeWidth={3} />
+                             {/* 状态图标：绿色对号 或 红色叉号 */}
+                             <div className={`w-10 h-10 rounded-2xl flex items-center justify-center shrink-0 font-bold text-xs ${
+                                isCorrect ? 'bg-green-100 text-green-500' : 'bg-red-100 text-red-500'
+                             }`}>
+                                {isCorrect ? <Check size={18} strokeWidth={3} /> : <X size={18} strokeWidth={3} />}
                              </div>
                              <div>
                                 <div className="font-bold text-gray-900 text-lg">{word.en}</div>

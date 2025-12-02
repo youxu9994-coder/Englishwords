@@ -19,6 +19,9 @@ export interface Word {
   example_cn?: string; // 例句中文翻译 (可选)
   tags?: string[];     // 标签 (可选)
   isStarred?: boolean; // 是否已收藏/标星
+  isLearned?: boolean; // 是否已学习
+  pos?: string;        // 词性 (来自API)
+  note?: string;       // 学习笔记/用户笔记
 }
 
 // 词书数据接口：定义一本词书的基本信息

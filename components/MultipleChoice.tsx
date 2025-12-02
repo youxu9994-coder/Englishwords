@@ -144,22 +144,24 @@ const MultipleChoice: React.FC<MultipleChoiceProps> = ({ words, onExit, onSwitch
                 ))}
              </div>
              
-             {/* 错题回顾 */}
+             {/* 单词回顾 - 展示所有单词 */}
              <div className="w-full bg-white rounded-[32px] border border-gray-100 shadow-xl shadow-gray-100/50 overflow-hidden mb-8 flex-1 min-h-[200px]">
                 <div className="p-6 border-b border-gray-50 bg-gray-50/50 flex justify-between items-center">
-                   <h3 className="font-bold text-gray-800">错题回顾</h3>
-                   <span className="text-xs font-bold text-gray-400 bg-white px-2 py-1 rounded-md border border-gray-100">{results.filter(r => !r.correct).length} words</span>
+                   <h3 className="font-bold text-gray-800">单词回顾</h3>
+                   <span className="text-xs font-bold text-gray-400 bg-white px-2 py-1 rounded-md border border-gray-100">{results.length} words</span>
                 </div>
                 
                 <div className="divide-y divide-gray-50 max-h-[300px] overflow-y-auto custom-scroll">
-                   {results.filter(r => !r.correct).length === 0 ? (
-                     <div className="p-12 text-center text-gray-400 font-medium">Perfect Score! 🎉</div>
+                   {results.length === 0 ? (
+                     <div className="p-12 text-center text-gray-400 font-medium">No words attempted.</div>
                    ) : (
-                     results.filter(r => !r.correct).map((res, idx) => (
+                     results.map((res, idx) => (
                          <div key={idx} className="p-5 flex items-center justify-between hover:bg-gray-50 transition-colors group">
                             <div className="flex items-center gap-4">
-                                <div className="w-10 h-10 rounded-2xl bg-red-100 flex items-center justify-center shrink-0 text-red-500 font-bold text-xs">
-                                <X size={18} strokeWidth={3} />
+                                <div className={`w-10 h-10 rounded-2xl flex items-center justify-center shrink-0 font-bold text-xs ${
+                                    res.correct ? 'bg-green-100 text-green-500' : 'bg-red-100 text-red-500'
+                                }`}>
+                                    {res.correct ? <Check size={18} strokeWidth={3} /> : <X size={18} strokeWidth={3} />}
                                 </div>
                                 <div>
                                 <div className="font-bold text-gray-900 text-lg">{res.word.en}</div>

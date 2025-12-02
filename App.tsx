@@ -1,5 +1,6 @@
+
 import React, { useState, useEffect } from 'react';
-import { Book, ViewState, User } from './types';
+import { Book, ViewState, User, Word } from './types';
 import { MOCK_WORDS } from './constants';
 import Home from './components/Home';
 import BookDetail from './components/BookDetail';
@@ -9,12 +10,14 @@ import MultipleChoice from './components/MultipleChoice';
 import MatchGame from './components/MatchGame';
 import Auth from './components/Auth';
 import { BookOpen, LogOut, User as UserIcon } from 'lucide-react';
+import { logout } from './services/api';
 
 const App: React.FC = () => {
   // 全局状态管理
   const [user, setUser] = useState<User | null>(null); // 当前登录用户
   const [view, setView] = useState<ViewState>(ViewState.HOME); // 当前视图
   const [selectedBook, setSelectedBook] = useState<Book | null>(null); // 当前选中的词书
+  const [studyWords, setStudyWords] = useState<Word[]>([]); // 当前正在学习的单词列表
   const [isAuthOpen, setIsAuthOpen] = useState(false); // 是否打开登录/注册弹窗
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login'); // 弹窗模式
 
@@ -35,11 +38,21 @@ const App: React.FC = () => {
   };
 
   // 登出处理
-  const handleLogout = () => {
-    setUser(null);
-    setSelectedBook(null);
-    setView(ViewState.HOME);
-    localStorage.removeItem('meow_user');
+  const handleLogout = async () => {
+    try {
+      // 调用服务端登出接口
+      await logout();
+    } catch (error) {
+      console.error("Logout failed on server:", error);
+    } finally {
+      // 无论服务端是否成功，前端都清除本地状态
+      setUser(null);
+      setSelectedBook(null);
+      setStudyWords([]);
+      setView(ViewState.HOME);
+      localStorage.removeItem('meow_user');
+      localStorage.removeItem('meow_token');
+    }
   };
 
   // 打开认证弹窗
@@ -62,11 +75,18 @@ const App: React.FC = () => {
   // 导航处理函数
   const handleBackToHome = () => {
     setSelectedBook(null);
+    setStudyWords([]);
     setView(ViewState.HOME);
   };
 
   const handleBackToDetail = () => {
     setView(ViewState.BOOK_DETAIL);
+  };
+
+  // 开始学习特定模式，并传入对应的单词列表
+  const handleStartStudy = (mode: ViewState, words: Word[]) => {
+      setStudyWords(words);
+      setView(mode);
   };
 
   // 根据当前 view 状态渲染对应的组件
@@ -87,21 +107,21 @@ const App: React.FC = () => {
             book={selectedBook} 
             words={MOCK_WORDS} 
             onBack={handleBackToHome} 
-            onSelectMode={setView}
+            onSelectMode={handleStartStudy}
           />
         ) : <Home onSelectBook={handleSelectBook} onRegister={() => openAuth('register')} isLoggedIn={!!user} />;
 
       case ViewState.MODE_FLASHCARD:
-        return <Flashcards words={MOCK_WORDS} onExit={handleBackToDetail} onSwitchMode={setView} />;
+        return <Flashcards words={studyWords} onExit={handleBackToDetail} onSwitchMode={(mode) => handleStartStudy(mode, studyWords)} />;
       
       case ViewState.MODE_DICTATION:
-        return <Dictation words={MOCK_WORDS} onExit={handleBackToDetail} onSwitchMode={setView} />;
+        return <Dictation words={studyWords} onExit={handleBackToDetail} onSwitchMode={(mode) => handleStartStudy(mode, studyWords)} />;
       
       case ViewState.MODE_CHOICE:
-        return <MultipleChoice words={MOCK_WORDS} onExit={handleBackToDetail} onSwitchMode={setView} />;
+        return <MultipleChoice words={studyWords} onExit={handleBackToDetail} onSwitchMode={(mode) => handleStartStudy(mode, studyWords)} />;
       
       case ViewState.MODE_MATCH:
-        return <MatchGame words={MOCK_WORDS} onExit={handleBackToDetail} onSwitchMode={setView} />;
+        return <MatchGame words={studyWords} onExit={handleBackToDetail} onSwitchMode={(mode) => handleStartStudy(mode, studyWords)} />;
         
       default:
         return (

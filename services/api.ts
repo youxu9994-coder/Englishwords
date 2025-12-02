@@ -1,8 +1,9 @@
 
-import { CATEGORIES, BOOKS } from '../constants';
+import { CATEGORIES, BOOKS, MOCK_WORDS } from '../constants';
+import { Word } from '../types';
 
 // 使用相对路径，以便通过 vite.config.ts 中的代理转发请求
-export const API_BASE_URL = '';
+export const API_BASE_URL = 'http://localhost:9981';
 
 export interface CategoryData {
   id: number;
@@ -15,6 +16,28 @@ export interface BookDetailData {
   totalWords: number;
   learnedWords: number;
   bookIcon: string;
+}
+
+export interface WordDetailItem {
+  id: number;
+  english: string;
+  chinese: string;
+  phonetic: string;
+  sentence: string;
+  sentenceTransaction: string;
+  wordTypeId: number;
+  bookId: number;
+  pos: string;
+}
+
+export interface StudyDetailItem {
+  wordId: number;
+  isStarred: boolean;
+  isLearned: boolean;
+  learningNotes: string | null;
+  incorrectCount: number;
+  correctCount: number;
+  learnCreateTime: string | null;
 }
 
 export interface ApiResponse<T> {
@@ -92,10 +115,79 @@ export const fetchBooksByCategory = async (categoryId: number): Promise<BookDeta
   }
 };
 
+export const fetchWordDetail = async (bookId: number | string): Promise<Word[]> => {
+  try {
+    const token = getToken();
+    const headers: HeadersInit = {};
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+
+    const response = await fetch(`${API_BASE_URL}/api/wordDetail?bookId=${bookId}`, {
+        method: 'GET',
+        headers: headers
+    });
+
+    if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    const json: ApiResponse<WordDetailItem[]> = await response.json();
+
+    if (json.code === 200 && Array.isArray(json.data)) {
+        // Map backend data to frontend Word interface
+        return json.data.map(item => ({
+            id: String(item.id),
+            en: item.english,
+            cn: item.chinese,
+            phonetic: item.phonetic,
+            example: item.sentence,
+            example_cn: item.sentenceTransaction,
+            pos: item.pos,
+            isStarred: false // Default, will be updated by study detail later if needed
+        }));
+    }
+    return [];
+  } catch (error) {
+      console.warn('Network Error fetching words:', error);
+      // Fallback to mock words if API fails, just for demo stability
+      return MOCK_WORDS; 
+  }
+};
+
+export const fetchStudyDetail = async (bookId: number | string): Promise<StudyDetailItem[]> => {
+  try {
+    const token = getToken();
+    const headers: HeadersInit = {};
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+
+    const response = await fetch(`${API_BASE_URL}/api/studyDetail?bookId=${bookId}`, {
+        method: 'GET',
+        headers: headers
+    });
+
+    if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    const json: ApiResponse<StudyDetailItem[]> = await response.json();
+
+    if (json.code === 200 && Array.isArray(json.data)) {
+        return json.data;
+    }
+    return [];
+  } catch (error) {
+      console.warn('Network Error fetching study details:', error);
+      return [];
+  }
+};
+
 export const login = async (username: string, password: string): Promise<ApiResponse<LoginResult | null>> => {
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 3000); // 3s Timeout
+    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s Timeout
 
     const response = await fetch(`${API_BASE_URL}/api/auth/login`, {
       method: 'POST',
@@ -125,41 +217,53 @@ export const login = async (username: string, password: string): Promise<ApiResp
       }
     });
     
-    // Mock Fallback for Login to allow app usage if backend is down
-    return {
-      code: 200,
-      data: {
-        token: "mock_token_" + Date.now(),
-        username: username,
-        userId: 888888
-      },
-      msg: "登录成功 (离线模式)"
-    };
+    throw error;
   }
 };
 
-export const register = async (username: string, password: string): Promise<ApiResponse<LoginResult | null>> => {
+export const register = async (username: string, password: string, activationCode: string): Promise<ApiResponse<LoginResult | null>> => {
   try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s Timeout
+
     const response = await fetch(`${API_BASE_URL}/api/auth/register`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ username, password, activationCode: 'DEFAULT_CODE' }), 
+        body: JSON.stringify({ username, password, activationCode }), 
+        signal: controller.signal
     });
+    
+    clearTimeout(timeoutId);
 
     const json: ApiResponse<LoginResult | null> = await response.json();
     return json;
   } catch (error) {
       console.error('Register API Error:', error);
-      return {
-          code: 200,
-          data: {
-              token: "mock_token_" + Date.now(),
-              username: username,
-              userId: 999999
-          },
-          msg: "注册成功 (离线模式)"
-      };
+      throw error;
   }
-}
+};
+
+export const logout = async (): Promise<ApiResponse<null>> => {
+  try {
+    const token = getToken();
+    const headers: HeadersInit = {};
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+
+    const response = await fetch(`${API_BASE_URL}/api/auth/logout`, {
+      method: 'POST',
+      headers: headers
+    });
+
+    // 即使服务器返回错误（如401），我们也尝试解析JSON，以便调用者可以打印日志
+    // 但通常前端无论如何都会清除本地Token
+    const json: ApiResponse<null> = await response.json();
+    return json;
+  } catch (error) {
+    console.error('Logout API Error:', error);
+    throw error;
+  }
+};

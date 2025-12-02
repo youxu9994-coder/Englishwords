@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { X, AlertCircle } from 'lucide-react';
-import { login } from '../services/api';
+import { login, register } from '../services/api';
 
 interface AuthProps {
   onLogin: (username: string) => void;
@@ -34,6 +34,11 @@ const Auth: React.FC<AuthProps> = ({ onLogin, onClose, initialMode }) => {
     setError('');
   }, [initialMode]);
 
+  // 验证手机号格式 (中国大陆手机号)
+  const isValidPhone = (p: string) => {
+    return /^1[3-9]\d{9}$/.test(p);
+  };
+
   // 提交表单处理
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -42,7 +47,7 @@ const Auth: React.FC<AuthProps> = ({ onLogin, onClose, initialMode }) => {
     
     try {
       if (view === 'login') {
-        // 调用登录接口
+        // --- 登录逻辑 ---
         const res = await login(phone, password);
         
         if (res.code === 200 && res.data) {
@@ -54,21 +59,63 @@ const Auth: React.FC<AuthProps> = ({ onLogin, onClose, initialMode }) => {
           setError(res.msg || '登录失败，请检查用户名或密码');
         }
       } else {
-        // 注册逻辑暂时保持模拟 (或者根据后续需求添加注册接口)
-        setTimeout(() => {
-          if (password !== confirmPassword) {
-             setError("两次输入的密码不一致");
-             setLoading(false);
-             return;
-          }
-          // 模拟注册成功
-          onLogin(phone);
-        }, 800);
+        // --- 注册逻辑 ---
+        
+        // 1. 验证手机号
+        if (!isValidPhone(phone)) {
+            setError("请输入有效的手机号");
+            setLoading(false);
+            return;
+        }
+
+        // 2. 验证密码长度 (>8位)
+        if (password.length <= 8) {
+            setError("密码长度必须大于8位");
+            setLoading(false);
+            return;
+        }
+
+        // 3. 验证两次密码一致
+        if (password !== confirmPassword) {
+            setError("两次输入的密码不一致");
+            setLoading(false);
+            return;
+        }
+
+        // 4. 验证邀请码不为空
+        if (!inviteCode.trim()) {
+            setError("请输入邀请码（激活码）");
+            setLoading(false);
+            return;
+        }
+
+        // 调用注册接口
+        const res = await register(phone, password, inviteCode);
+        
+        if (res.code === 200 && res.data) {
+             // 注册成功并自动登录
+             localStorage.setItem('meow_token', res.data.token);
+             onLogin(res.data.username);
+        } else {
+            setError(res.msg || '注册失败，请检查信息后重试');
+        }
       }
     } catch (err) {
-      setError('网络请求发生错误，请稍后重试');
+      console.error("Auth Component Error:", err);
+      // 这里处理具体的网络错误对象
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      if (errorMessage.includes('Failed to fetch')) {
+        setError('无法连接到服务器，请检查网络或稍后重试');
+      } else if (errorMessage.includes('timeout') || errorMessage.includes('aborted')) {
+        setError('请求超时，请检查网络');
+      } else {
+        setError('发生未知错误，请稍后重试');
+      }
     } finally {
-      if (view === 'login') setLoading(false);
+      // 只有在没有成功跳转（组件未卸载/模式未切换）时才取消loading，
+      // 但这里onLogin会触发父组件更新导致此组件卸载，所以如果是成功的，setLoading可能在卸载组件上调用警告，
+      // 不过React 18会自动处理这个，或者我们可以保留这个清理逻辑
+      setLoading(false);
     }
   };
 
@@ -95,8 +142,8 @@ const Auth: React.FC<AuthProps> = ({ onLogin, onClose, initialMode }) => {
             <p className="text-gray-500 mb-5 text-xs">创建账户，邀请码将与您的手机号绑定</p>
 
             {error && (
-              <div className="mb-4 p-2 bg-red-50 border border-red-100 rounded-lg flex items-center gap-2 text-xs text-red-500">
-                <AlertCircle size={14} />
+              <div className="mb-4 p-2 bg-red-50 border border-red-100 rounded-lg flex items-center gap-2 text-xs text-red-500 break-words">
+                <AlertCircle size={14} className="shrink-0" />
                 <span>{error}</span>
               </div>
             )}
@@ -115,10 +162,10 @@ const Auth: React.FC<AuthProps> = ({ onLogin, onClose, initialMode }) => {
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-gray-700 mb-1">用户名/手机号</label>
+                <label className="block text-xs font-bold text-gray-700 mb-1">手机号</label>
                 <input
                   type="text"
-                  placeholder="请输入用户名"
+                  placeholder="请输入手机号"
                   className="w-full px-3 py-2 text-sm rounded-lg border border-gray-200 focus:border-black focus:ring-1 focus:ring-black outline-none transition-all"
                   value={phone}
                   onChange={e => setPhone(e.target.value)}
@@ -130,7 +177,7 @@ const Auth: React.FC<AuthProps> = ({ onLogin, onClose, initialMode }) => {
                 <label className="block text-xs font-bold text-gray-700 mb-1">密码</label>
                 <input
                   type="password"
-                  placeholder="请输入密码"
+                  placeholder="请输入密码（>8位）"
                   className="w-full px-3 py-2 text-sm rounded-lg border border-gray-200 focus:border-black focus:ring-1 focus:ring-black outline-none transition-all"
                   value={password}
                   onChange={e => setPassword(e.target.value)}
@@ -173,18 +220,18 @@ const Auth: React.FC<AuthProps> = ({ onLogin, onClose, initialMode }) => {
             <p className="text-gray-500 mb-6 text-xs">欢迎回来！请登录您的账户</p>
 
             {error && (
-              <div className="mb-4 p-2 bg-red-50 border border-red-100 rounded-lg flex items-center gap-2 text-xs text-red-500">
-                <AlertCircle size={14} />
+              <div className="mb-4 p-2 bg-red-50 border border-red-100 rounded-lg flex items-center gap-2 text-xs text-red-500 break-words">
+                <AlertCircle size={14} className="shrink-0" />
                 <span>{error}</span>
               </div>
             )}
 
             <div className="space-y-4">
               <div>
-                <label className="block text-xs font-bold text-gray-700 mb-1">用户名/手机号</label>
+                <label className="block text-xs font-bold text-gray-700 mb-1">手机号</label>
                 <input
                   type="text"
-                  placeholder="请输入用户名"
+                  placeholder="请输入手机号"
                   className="w-full px-3 py-2 text-sm rounded-lg border border-gray-200 focus:border-black focus:ring-1 focus:ring-black outline-none transition-all"
                   value={phone}
                   onChange={e => setPhone(e.target.value)}

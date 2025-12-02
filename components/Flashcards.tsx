@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { ViewState, Word } from '../types';
-import { Volume2, Star, ChevronLeft, ChevronRight, RotateCw, Trophy, BookOpen, Sparkles } from 'lucide-react';
+import { Volume2, Star, ChevronLeft, ChevronRight, RotateCw, Trophy, BookOpen, Sparkles, PenLine } from 'lucide-react';
 import StudyHeader from './StudyHeader';
 
 interface FlashcardsProps {
@@ -16,6 +16,11 @@ const Flashcards: React.FC<FlashcardsProps> = ({ words, onExit, onSwitchMode }) 
   const [isFlipped, setIsFlipped] = useState(false);   // 卡片是否翻转
   const [isCompleted, setIsCompleted] = useState(false); // 是否完成所有学习
   const [starredWords, setStarredWords] = useState<Set<string>>(new Set()); // 本地收藏状态
+  
+  // 笔记状态
+  const [wordNotes, setWordNotes] = useState<Map<string, string>>(new Map()); // 本地笔记存储
+  const [isEditingNote, setIsEditingNote] = useState(false); // 是否处于编辑笔记模式
+  const [noteInput, setNoteInput] = useState(''); // 笔记输入内容
 
   // 拖拽状态
   const [isDragging, setIsDragging] = useState(false);
@@ -26,12 +31,46 @@ const Flashcards: React.FC<FlashcardsProps> = ({ words, onExit, onSwitchMode }) 
   const currentWord = words && words.length > 0 ? words[currentIndex] : undefined;
   const progress = words.length > 0 ? ((currentIndex + 1) / words.length) * 100 : 0;
 
-  // 初始化收藏状态
+  // 初始化数据
   useEffect(() => {
     if (!words || words.length === 0) return;
+    
+    // 初始化收藏状态
     const initialStars = new Set(words.filter(w => w && w.isStarred).map(w => w.id));
     setStarredWords(initialStars);
+    
+    // 初始化笔记状态
+    const initialNotes = new Map<string, string>();
+    words.forEach(w => {
+        if (w.note) initialNotes.set(w.id, w.note);
+    });
+    setWordNotes(initialNotes);
+
   }, [words]);
+
+  // 当切换单词时，重置笔记编辑状态并更新输入框
+  useEffect(() => {
+    if (currentWord) {
+        setNoteInput(wordNotes.get(currentWord.id) || '');
+        setIsEditingNote(false);
+    }
+  }, [currentIndex, currentWord, wordNotes]);
+
+  // 保存笔记
+  const handleSaveNote = (e: React.MouseEvent) => {
+      e.stopPropagation();
+      if (!currentWord) return;
+      
+      const newNotes = new Map(wordNotes);
+      if (noteInput.trim()) {
+          newNotes.set(currentWord.id, noteInput.trim());
+      } else {
+          newNotes.delete(currentWord.id);
+      }
+      setWordNotes(newNotes);
+      setIsEditingNote(false);
+      // TODO: Call API to save note permanently
+  };
 
   // 切换收藏
   const toggleStar = (e: React.MouseEvent) => {
@@ -48,11 +87,15 @@ const Flashcards: React.FC<FlashcardsProps> = ({ words, onExit, onSwitchMode }) 
 
   // Safe access for isStarred
   const isStarred = currentWord ? starredWords.has(currentWord.id) : false;
+  // Get current note
+  const currentNote = currentWord ? wordNotes.get(currentWord.id) : undefined;
 
   // 键盘导航
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-        if (isCompleted || isAnimating) return;
+        // 如果正在编辑笔记，不响应快捷键
+        if (isCompleted || isAnimating || isEditingNote) return;
+        
         switch(e.key) {
             case 'ArrowLeft':
                 handlePrev();
@@ -69,7 +112,7 @@ const Flashcards: React.FC<FlashcardsProps> = ({ words, onExit, onSwitchMode }) 
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [currentIndex, isCompleted, isAnimating]);
+  }, [currentIndex, isCompleted, isAnimating, isEditingNote]);
 
   // 播放发音
   const playAudio = (text: string) => {
@@ -128,7 +171,8 @@ const Flashcards: React.FC<FlashcardsProps> = ({ words, onExit, onSwitchMode }) 
   // --- 统一的拖拽处理逻辑 (鼠标 + 触摸) ---
 
   const handleDragStart = (clientX: number) => {
-      if (isAnimating || isCompleted) return;
+      // 编辑笔记时禁止拖拽
+      if (isAnimating || isCompleted || isEditingNote) return;
       setIsDragging(true);
       setStartX(clientX);
   };
@@ -167,7 +211,10 @@ const Flashcards: React.FC<FlashcardsProps> = ({ words, onExit, onSwitchMode }) 
 
   // 鼠标事件适配
   const onMouseDown = (e: React.MouseEvent) => {
-      e.preventDefault(); // 关键修复：防止浏览器默认拖拽行为（如选中文本或拖动图片），解决拖拽不灵敏问题
+      // 检查是否点击了输入框或按钮，如果是则不触发拖拽
+      if ((e.target as HTMLElement).closest('input, textarea, button')) return;
+      
+      e.preventDefault(); 
       handleDragStart(e.clientX);
   };
   const onMouseMove = (e: React.MouseEvent) => handleDragMove(e.clientX);
@@ -177,8 +224,21 @@ const Flashcards: React.FC<FlashcardsProps> = ({ words, onExit, onSwitchMode }) 
   };
 
   // 渲染释义：尝试提取词性 (v., n., adj.)
-  const renderDefinitionWithPOS = (text: string) => {
-      const match = text.match(/^([a-z]+\.)\s+(.*)/);
+  const renderDefinitionWithPOS = (word: Word) => {
+      // 优先使用 API 提供的 pos 字段
+      if (word.pos) {
+          return (
+              <div className="flex flex-col items-center gap-1 text-sm text-gray-800">
+                  <span className="px-2 py-0.5 bg-gray-100 text-gray-600 rounded text-xs font-serif italic font-bold">
+                      {word.pos}.
+                  </span>
+                  <span className="leading-snug text-center font-medium">{word.cn}</span>
+              </div>
+          );
+      }
+      
+      // 回退逻辑：尝试从中文释义中解析
+      const match = word.cn.match(/^([a-z]+\.)\s+(.*)/);
       if (match) {
           return (
               <div className="flex flex-col items-center gap-1 text-sm text-gray-800">
@@ -189,7 +249,7 @@ const Flashcards: React.FC<FlashcardsProps> = ({ words, onExit, onSwitchMode }) 
               </div>
           );
       }
-      return <div className="text-sm text-gray-800 leading-snug font-medium text-center">{text}</div>;
+      return <div className="text-sm text-gray-800 leading-snug font-medium text-center">{word.cn}</div>;
   };
 
   // 高亮例句中的单词
@@ -289,9 +349,9 @@ const Flashcards: React.FC<FlashcardsProps> = ({ words, onExit, onSwitchMode }) 
                 onMouseUp={onMouseUp}
                 onMouseLeave={onMouseLeave}
                 onClick={(e) => {
-                    // 防止在拖拽结束时触发翻转
+                    // 防止在拖拽结束时触发翻转，也防止在编辑笔记时触发翻转
                     // 严格限制点击判断：只有位移非常小 (<2) 时才认为是点击
-                    if (!isDragging && Math.abs(dragOffset) < 2) {
+                    if (!isDragging && Math.abs(dragOffset) < 2 && !isEditingNote && !(e.target as HTMLElement).closest('button, textarea')) {
                         setIsFlipped(!isFlipped);
                     }
                 }}
@@ -336,10 +396,10 @@ const Flashcards: React.FC<FlashcardsProps> = ({ words, onExit, onSwitchMode }) 
                              </button>
                         </div>
 
-                        <div className="flex-1 overflow-y-auto custom-scroll p-4 flex flex-col items-center justify-center min-h-0">
+                        <div className="flex-1 overflow-y-auto custom-scroll p-4 flex flex-col items-center justify-start min-h-0">
                             
                             {/* 头部：单词与音标 */}
-                            <div className="text-center mb-3">
+                            <div className="text-center mb-3 mt-2 shrink-0">
                                 <div className="flex items-center justify-center gap-1.5 mb-0.5">
                                     <h2 className="text-xl font-black text-gray-900">{currentWord.en}</h2>
                                     <button 
@@ -353,13 +413,13 @@ const Flashcards: React.FC<FlashcardsProps> = ({ words, onExit, onSwitchMode }) 
                             </div>
 
                             {/* 释义 */}
-                            <div className="w-full mb-4">
-                                {renderDefinitionWithPOS(currentWord.cn)}
+                            <div className="w-full mb-4 shrink-0">
+                                {renderDefinitionWithPOS(currentWord)}
                             </div>
 
                             {/* 例句 */}
                             {currentWord.example && (
-                                <div className="w-full bg-gray-50 rounded-lg p-3 text-left border border-gray-100 mt-auto">
+                                <div className="w-full bg-gray-50 rounded-lg p-3 text-left border border-gray-100 shrink-0">
                                      <div className="flex items-start justify-between gap-2 mt-0.5">
                                          <p className="text-xs text-gray-800 leading-snug font-medium mt-0.5">
                                             {highlightWord(currentWord.example, currentWord.en)}
@@ -376,6 +436,55 @@ const Flashcards: React.FC<FlashcardsProps> = ({ words, onExit, onSwitchMode }) 
                                      </p>
                                 </div>
                             )}
+
+                            {/* 笔记区域 */}
+                            <div className="w-full mt-auto pt-2 pb-1">
+                                {isEditingNote ? (
+                                    <div className="relative animate-fade-in" onClick={e => e.stopPropagation()}>
+                                        <textarea
+                                            value={noteInput}
+                                            onChange={(e) => setNoteInput(e.target.value)}
+                                            placeholder="写下你的理解、联想或自己的例句..."
+                                            className="w-full h-20 p-2 text-xs bg-gray-50 border border-black rounded-lg outline-none resize-none text-gray-700"
+                                            autoFocus
+                                        />
+                                        <div className="flex justify-end mt-1">
+                                             <button 
+                                                onClick={handleSaveNote}
+                                                className="px-3 py-1 bg-black text-white text-[10px] rounded-full font-bold hover:bg-gray-800"
+                                             >
+                                                完成
+                                             </button>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div className="w-full" onClick={e => e.stopPropagation()}>
+                                        {currentNote ? (
+                                            <div 
+                                                onClick={() => setIsEditingNote(true)}
+                                                className="w-full bg-yellow-50 border border-yellow-100 rounded-lg p-2 relative group cursor-pointer hover:bg-yellow-100/50 transition-colors"
+                                            >
+                                                <div className="flex items-center gap-1 mb-1">
+                                                    <PenLine size={10} className="text-yellow-600" />
+                                                    <span className="text-[10px] font-bold text-yellow-600">笔记</span>
+                                                </div>
+                                                <p className="text-xs text-gray-700 whitespace-pre-wrap">{currentNote}</p>
+                                                <button className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                     <PenLine size={12} className="text-gray-400" />
+                                                </button>
+                                            </div>
+                                        ) : (
+                                            <button 
+                                                onClick={() => setIsEditingNote(true)}
+                                                className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-50 rounded-full text-xs text-gray-500 hover:bg-gray-100 hover:text-black transition-colors border border-gray-100"
+                                            >
+                                                <PenLine size={12} />
+                                                <span className="font-bold">记笔记</span>
+                                            </button>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
                         </div>
                     </div>
                 </div>
