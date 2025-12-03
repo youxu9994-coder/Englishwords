@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { ViewState, Word } from '../types';
 import { Volume2, CheckCircle2, XCircle, RotateCcw, Check, LogOut, X, Star } from 'lucide-react';
 import StudyHeader from './StudyHeader';
+import { updateStudyStatus, UpdateStudyStatusRequest } from '../services/api';
 
 interface MultipleChoiceProps {
   words: Word[];
@@ -27,6 +28,33 @@ const MultipleChoice: React.FC<MultipleChoiceProps> = ({ words, onExit, onSwitch
     const initialStars = new Set(words.filter(w => w && w.isStarred).map(w => w.id));
     setStarredWords(initialStars);
   }, [words]);
+
+  // 监听完成状态，批量上传结果
+  useEffect(() => {
+    if (isCompleted && results.length > 0) {
+      const requests: UpdateStudyStatusRequest[] = [];
+
+      results.forEach(res => {
+        const wordIdNum = Number(res.word.id);
+        if (!isNaN(wordIdNum)) {
+           requests.push({
+             wordId: wordIdNum,
+             updateModules: [2, 4], // 2-标星, 4-正确率
+             // 错误时标星(true)，正确时不标星(false)
+             isStarred: !res.correct,
+             correctCount: res.correct ? 1 : 0,
+             incorrectCount: res.correct ? 0 : 1
+           });
+        }
+      });
+
+      if (requests.length > 0) {
+        updateStudyStatus(requests).catch(err => {
+          console.error("Failed to batch save multiple choice results:", err);
+        });
+      }
+    }
+  }, [isCompleted, results]);
 
   // 切换单词收藏状态
   const toggleStar = (wordId: string) => {
@@ -76,7 +104,7 @@ const MultipleChoice: React.FC<MultipleChoiceProps> = ({ words, onExit, onSwitch
     // 记录结果
     setResults(prev => [...prev, { word: currentWord, correct }]);
     
-    // 如果答错，自动加入错题本(收藏)
+    // 如果答错，自动加入错题本(收藏) - 本地状态，API在最后统一提交
     if (!correct) {
         setStarredWords(prev => new Set(prev).add(currentWord.id));
     }

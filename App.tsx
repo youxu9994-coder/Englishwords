@@ -29,6 +29,29 @@ const App: React.FC = () => {
     }
   }, []);
 
+  // 监听 401 未授权事件 (Token过期或无效)
+  useEffect(() => {
+    const handleUnauthorized = () => {
+      // 清除本地状态，类似于登出
+      setUser(null);
+      setSelectedBook(null);
+      setStudyWords([]);
+      setView(ViewState.HOME);
+      localStorage.removeItem('meow_user');
+      localStorage.removeItem('meow_token');
+      
+      // 打开登录弹窗
+      setAuthMode('login');
+      setIsAuthOpen(true);
+    };
+
+    window.addEventListener('auth:unauthorized', handleUnauthorized);
+    
+    return () => {
+      window.removeEventListener('auth:unauthorized', handleUnauthorized);
+    };
+  }, []);
+
   // 登录处理
   const handleLogin = (username: string) => {
     const newUser = { username };

@@ -3,6 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { ViewState, Word } from '../types';
 import { HelpCircle, Check, X, Star, RotateCcw, LogOut } from 'lucide-react';
 import StudyHeader from './StudyHeader';
+import { updateStudyStatus, UpdateStudyStatusRequest } from '../services/api';
 
 interface DictationProps {
   words: Word[];
@@ -55,6 +56,35 @@ const Dictation: React.FC<DictationProps> = ({ words, onExit, onSwitchMode }) =>
     return () => clearTimer();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentIndex, isCompleted, currentWord]);
+
+  // 监听完成状态，批量上传结果
+  useEffect(() => {
+    if (isCompleted && attempts.length > 0) {
+      const requests: UpdateStudyStatusRequest[] = [];
+      
+      attempts.forEach(attempt => {
+        const wordIdNum = Number(attempt.wordId);
+        // 确保ID是有效数字（过滤掉模拟数据的ID）
+        if (!isNaN(wordIdNum)) {
+           requests.push({
+             wordId: wordIdNum,
+             updateModules: [2, 4], // 2-标星, 4-正确率
+             // 错误时标星(true)，正确时不标星(false)
+             isStarred: !attempt.isCorrect,
+             // 累加正确/错误次数
+             correctCount: attempt.isCorrect ? 1 : 0,
+             incorrectCount: attempt.isCorrect ? 0 : 1
+           });
+        }
+      });
+
+      if (requests.length > 0) {
+        updateStudyStatus(requests).catch(err => {
+          console.error("Failed to batch save dictation results:", err);
+        });
+      }
+    }
+  }, [isCompleted, attempts]);
 
   // 清除定时器
   const clearTimer = () => {

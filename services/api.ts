@@ -53,9 +53,29 @@ export interface LoginResult {
   userId: number;
 }
 
+// 更新学习状态请求结构
+export interface UpdateStudyStatusRequest {
+  wordId: number;
+  updateModules: number[]; // 1-已学习，2-标星，3-学习笔记，4-正确率
+  isStarred?: boolean;
+  isLearned?: boolean;
+  learningNotes?: string;
+  incorrectCount?: number;
+  correctCount?: number;
+}
+
 // 获取Token的辅助函数
 const getToken = (): string | null => {
   return localStorage.getItem('meow_token');
+};
+
+// 统一处理 401 未授权
+const handleUnauthorized = () => {
+  console.warn('Unauthorized access detected (401). Clearing session and triggering re-login.');
+  localStorage.removeItem('meow_token');
+  localStorage.removeItem('meow_user');
+  // 派发自定义事件，App.tsx 会监听此事件并打开登录弹窗
+  window.dispatchEvent(new Event('auth:unauthorized'));
 };
 
 export const fetchCategories = async (): Promise<CategoryData[]> => {
@@ -70,6 +90,12 @@ export const fetchCategories = async (): Promise<CategoryData[]> => {
       method: 'GET',
       headers: headers
     });
+
+    if (response.status === 401) {
+      handleUnauthorized();
+      // 返回模拟数据防止页面崩溃，等待跳转登录
+      return CATEGORIES.map((c, index) => ({ id: index + 1, name: c }));
+    }
 
     if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
@@ -99,6 +125,11 @@ export const fetchBooksByCategory = async (categoryId: number): Promise<BookDeta
       headers: headers
     });
 
+    if (response.status === 401) {
+      handleUnauthorized();
+      return [];
+    }
+
     if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
     }
@@ -110,7 +141,6 @@ export const fetchBooksByCategory = async (categoryId: number): Promise<BookDeta
     return [];
   } catch (error) {
     console.warn('Network Error fetching books', error);
-    // Fallback logic could go here if needed, but returning empty for now to prefer API data
     return [];
   }
 };
@@ -127,6 +157,11 @@ export const fetchWordDetail = async (bookId: number | string): Promise<Word[]> 
         method: 'GET',
         headers: headers
     });
+
+    if (response.status === 401) {
+      handleUnauthorized();
+      return [];
+    }
 
     if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
@@ -168,6 +203,11 @@ export const fetchStudyDetail = async (bookId: number | string): Promise<StudyDe
         headers: headers
     });
 
+    if (response.status === 401) {
+      handleUnauthorized();
+      return [];
+    }
+
     if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
     }
@@ -181,6 +221,38 @@ export const fetchStudyDetail = async (bookId: number | string): Promise<StudyDe
   } catch (error) {
       console.warn('Network Error fetching study details:', error);
       return [];
+  }
+};
+
+export const updateStudyStatus = async (requests: UpdateStudyStatusRequest[]): Promise<ApiResponse<null>> => {
+  try {
+    const token = getToken();
+    const headers: HeadersInit = {
+        'Content-Type': 'application/json'
+    };
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+
+    const response = await fetch(`${API_BASE_URL}/api/updateStudyStatus`, {
+      method: 'POST',
+      headers: headers,
+      body: JSON.stringify(requests)
+    });
+
+    if (response.status === 401) {
+      handleUnauthorized();
+      throw new Error('Unauthorized');
+    }
+
+    if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    const json: ApiResponse<null> = await response.json();
+    return json;
+  } catch (error) {
+    console.error('Update Study Status Error:', error);
+    throw error;
   }
 };
 

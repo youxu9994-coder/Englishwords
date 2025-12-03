@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { ViewState, Word } from '../types';
 import { Volume2, Star, ChevronLeft, ChevronRight, RotateCw, Trophy, BookOpen, Sparkles, PenLine } from 'lucide-react';
 import StudyHeader from './StudyHeader';
+import { updateStudyStatus } from '../services/api';
 
 interface FlashcardsProps {
   words: Word[];
@@ -21,6 +22,9 @@ const Flashcards: React.FC<FlashcardsProps> = ({ words, onExit, onSwitchMode }) 
   const [wordNotes, setWordNotes] = useState<Map<string, string>>(new Map()); // 本地笔记存储
   const [isEditingNote, setIsEditingNote] = useState(false); // 是否处于编辑笔记模式
   const [noteInput, setNoteInput] = useState(''); // 笔记输入内容
+
+  // 学习状态追踪 (本次会话已标记为已学的单词ID)
+  const [learnedSessionIds, setLearnedSessionIds] = useState<Set<string>>(new Set());
 
   // 拖拽状态
   const [isDragging, setIsDragging] = useState(false);
@@ -45,6 +49,9 @@ const Flashcards: React.FC<FlashcardsProps> = ({ words, onExit, onSwitchMode }) 
         if (w.note) initialNotes.set(w.id, w.note);
     });
     setWordNotes(initialNotes);
+    
+    // 重置会话学习记录
+    setLearnedSessionIds(new Set());
 
   }, [words]);
 
@@ -56,33 +63,105 @@ const Flashcards: React.FC<FlashcardsProps> = ({ words, onExit, onSwitchMode }) 
     }
   }, [currentIndex, currentWord, wordNotes]);
 
+  // 检查并标记当前单词为已学
+  const checkAndMarkLearned = () => {
+    if (!currentWord) return;
+
+    // 如果服务端数据已经是已学，或者本次会话已经标记过，则跳过
+    if (currentWord.isLearned || learnedSessionIds.has(currentWord.id)) {
+        return;
+    }
+
+    // 更新本地会话记录，防止重复调用
+    setLearnedSessionIds(prev => new Set(prev).add(currentWord.id));
+
+    // 调用API
+    const wordIdNum = Number(currentWord.id);
+    if (!isNaN(wordIdNum)) {
+        updateStudyStatus([{
+            wordId: wordIdNum,
+            updateModules: [1], // 1代表更新已学习状态
+            isLearned: true
+        }]).catch(error => {
+            console.error("Failed to mark word as learned:", error);
+            // 如果API调用失败，可以选择从learnedSessionIds中移除，以便下次重试
+            // 但为了避免网络不稳定时的频繁请求，这里暂不做移除
+        });
+    }
+  };
+
   // 保存笔记
-  const handleSaveNote = (e: React.MouseEvent) => {
+  const handleSaveNote = async (e: React.MouseEvent) => {
       e.stopPropagation();
       if (!currentWord) return;
       
+      const noteContent = noteInput.trim();
       const newNotes = new Map(wordNotes);
-      if (noteInput.trim()) {
-          newNotes.set(currentWord.id, noteInput.trim());
+      
+      // 更新本地状态
+      if (noteContent) {
+          newNotes.set(currentWord.id, noteContent);
       } else {
           newNotes.delete(currentWord.id);
       }
       setWordNotes(newNotes);
       setIsEditingNote(false);
-      // TODO: Call API to save note permanently
+      
+      // 调用API保存笔记 (仅当笔记不为空时)
+      if (noteContent) {
+          try {
+              const wordIdNum = Number(currentWord.id);
+              if (!isNaN(wordIdNum)) {
+                  await updateStudyStatus([{
+                      wordId: wordIdNum,
+                      updateModules: [3], // 3代表更新学习笔记
+                      learningNotes: noteContent
+                  }]);
+              }
+          } catch (error) {
+              console.error("Failed to save note:", error);
+              // 可以在这里添加 Toast 提示用户保存失败
+          }
+      }
   };
 
   // 切换收藏
-  const toggleStar = (e: React.MouseEvent) => {
+  const toggleStar = async (e: React.MouseEvent) => {
     e.stopPropagation();
     if (!currentWord) return;
     const id = currentWord.id;
+    const wordIdNum = Number(id);
+
+    const isStarred = starredWords.has(id);
+    const newStatus = !isStarred;
+
+    // 乐观UI更新
     setStarredWords(prev => {
         const next = new Set(prev);
         if (next.has(id)) next.delete(id);
         else next.add(id);
         return next;
     });
+
+    // 调用API更新服务端状态
+    try {
+        if (!isNaN(wordIdNum)) {
+            await updateStudyStatus([{
+                wordId: wordIdNum,
+                updateModules: [2], // 2代表更新标星状态
+                isStarred: newStatus
+            }]);
+        }
+    } catch (error) {
+        console.error("Failed to sync star status:", error);
+        // 如果失败，回滚状态
+        setStarredWords(prev => {
+             const next = new Set(prev);
+             if (isStarred) next.add(id);
+             else next.delete(id);
+             return next;
+        });
+    }
   };
 
   // Safe access for isStarred
@@ -125,6 +204,10 @@ const Flashcards: React.FC<FlashcardsProps> = ({ words, onExit, onSwitchMode }) 
   // 切换下一个单词
   const handleNext = () => {
     if (isAnimating) return;
+    
+    // 切换前标记当前单词为已学
+    checkAndMarkLearned();
+
     if (currentIndex < words.length - 1) {
       animateSwitch('next');
     } else {
@@ -135,6 +218,10 @@ const Flashcards: React.FC<FlashcardsProps> = ({ words, onExit, onSwitchMode }) 
   // 切换上一个单词
   const handlePrev = () => {
     if (isAnimating || currentIndex === 0) return;
+    
+    // 切换前标记当前单词为已学
+    checkAndMarkLearned();
+
     animateSwitch('prev');
   };
 
@@ -166,6 +253,7 @@ const Flashcards: React.FC<FlashcardsProps> = ({ words, onExit, onSwitchMode }) 
     setCurrentIndex(0);
     setIsFlipped(false);
     setDragOffset(0);
+    setLearnedSessionIds(new Set()); // 重置会话记录，允许重新标记
   };
 
   // --- 统一的拖拽处理逻辑 (鼠标 + 触摸) ---
@@ -228,11 +316,11 @@ const Flashcards: React.FC<FlashcardsProps> = ({ words, onExit, onSwitchMode }) 
       // 优先使用 API 提供的 pos 字段
       if (word.pos) {
           return (
-              <div className="flex flex-col items-center gap-1 text-sm text-gray-800">
-                  <span className="px-2 py-0.5 bg-gray-100 text-gray-600 rounded text-xs font-serif italic font-bold">
+              <div className="flex flex-col items-center gap-1 text-gray-800">
+                  <span className="px-2 py-0.5 bg-gray-100 text-gray-600 rounded text-[10px] font-serif italic font-bold">
                       {word.pos}.
                   </span>
-                  <span className="leading-snug text-center font-medium">{word.cn}</span>
+                  <span className="leading-snug text-center font-medium text-xs">{word.cn}</span>
               </div>
           );
       }
@@ -241,15 +329,15 @@ const Flashcards: React.FC<FlashcardsProps> = ({ words, onExit, onSwitchMode }) 
       const match = word.cn.match(/^([a-z]+\.)\s+(.*)/);
       if (match) {
           return (
-              <div className="flex flex-col items-center gap-1 text-sm text-gray-800">
-                  <span className="px-2 py-0.5 bg-gray-100 text-gray-600 rounded text-xs font-serif italic font-bold">
+              <div className="flex flex-col items-center gap-1 text-gray-800">
+                  <span className="px-2 py-0.5 bg-gray-100 text-gray-600 rounded text-[10px] font-serif italic font-bold">
                       {match[1]}
                   </span>
-                  <span className="leading-snug text-center font-medium">{match[2]}</span>
+                  <span className="leading-snug text-center font-medium text-xs">{match[2]}</span>
               </div>
           );
       }
-      return <div className="text-sm text-gray-800 leading-snug font-medium text-center">{word.cn}</div>;
+      return <div className="text-xs text-gray-800 leading-snug font-medium text-center">{word.cn}</div>;
   };
 
   // 高亮例句中的单词
@@ -310,7 +398,7 @@ const Flashcards: React.FC<FlashcardsProps> = ({ words, onExit, onSwitchMode }) 
   }
 
   // Safety check
-  if (!currentWord) return null;
+  if (!currentWord && !isCompleted) return null;
 
   return (
     <div className="flex flex-col h-screen bg-[#FDFDFD]">
@@ -334,7 +422,7 @@ const Flashcards: React.FC<FlashcardsProps> = ({ words, onExit, onSwitchMode }) 
         </div>
 
         {/* 卡片容器 */}
-        <div className="w-full max-w-sm mx-auto relative mb-4 min-h-[200px] flex-grow-0 aspect-[5/4]">
+        <div className="w-full max-w-[280px] mx-auto relative mb-3 min-h-[210px] flex-grow-0 aspect-[4/3]">
             {/* 卡片堆叠装饰 */}
             <div className="absolute top-2 left-2 right-[-8px] bottom-[-8px] bg-gray-900/5 rounded-[20px] -z-10 transform rotate-2"></div>
             <div className="absolute top-1 left-1 right-[-4px] bottom-[-4px] bg-gray-900/5 rounded-[20px] -z-10 transform rotate-1"></div>
@@ -367,7 +455,7 @@ const Flashcards: React.FC<FlashcardsProps> = ({ words, onExit, onSwitchMode }) 
                 <div className={`w-full h-full transition-transform duration-500 [transform-style:preserve-3d] ${isFlipped ? '[transform:rotateY(180deg)]' : ''}`}>
                     
                     {/* --- 正面：极简模式 --- */}
-                    <div className="absolute inset-0 [backface-visibility:hidden] bg-white rounded-[20px] shadow-xl shadow-gray-200/50 border border-gray-100 flex flex-col items-center justify-center p-4 group select-none">
+                    <div className="absolute inset-0 [backface-visibility:hidden] bg-white rounded-[20px] shadow-xl shadow-gray-200/50 border border-gray-100 flex flex-col items-center justify-center p-3 group select-none">
                          
                         <div className="absolute top-4 right-4 z-20" onClick={toggleStar}>
                              <button className="text-gray-300 hover:text-yellow-400 hover:scale-110 transition-all p-1.5">
@@ -376,7 +464,7 @@ const Flashcards: React.FC<FlashcardsProps> = ({ words, onExit, onSwitchMode }) 
                         </div>
                         
                         <div className="flex items-center gap-2">
-                            <h2 className="text-3xl font-black text-gray-800 tracking-tight text-center">
+                            <h2 className="text-2xl font-black text-gray-800 tracking-tight text-center">
                                 {currentWord.en}
                             </h2>
                             <button 
@@ -396,12 +484,12 @@ const Flashcards: React.FC<FlashcardsProps> = ({ words, onExit, onSwitchMode }) 
                              </button>
                         </div>
 
-                        <div className="flex-1 overflow-y-auto custom-scroll p-4 flex flex-col items-center justify-start min-h-0">
+                        <div className="flex-1 overflow-y-auto custom-scroll p-3 flex flex-col items-center justify-start min-h-0 gap-2">
                             
                             {/* 头部：单词与音标 */}
-                            <div className="text-center mb-3 mt-2 shrink-0">
+                            <div className="text-center mt-1 shrink-0">
                                 <div className="flex items-center justify-center gap-1.5 mb-0.5">
-                                    <h2 className="text-xl font-black text-gray-900">{currentWord.en}</h2>
+                                    <h2 className="text-lg font-black text-gray-900">{currentWord.en}</h2>
                                     <button 
                                         onClick={(e) => { e.stopPropagation(); playAudio(currentWord.en); }} 
                                         className="text-gray-400 hover:text-black transition-colors"
@@ -413,22 +501,22 @@ const Flashcards: React.FC<FlashcardsProps> = ({ words, onExit, onSwitchMode }) 
                             </div>
 
                             {/* 释义 */}
-                            <div className="w-full mb-4 shrink-0">
+                            <div className="w-full shrink-0">
                                 {renderDefinitionWithPOS(currentWord)}
                             </div>
 
                             {/* 例句 */}
                             {currentWord.example && (
-                                <div className="w-full bg-gray-50 rounded-lg p-3 text-left border border-gray-100 shrink-0">
+                                <div className="w-full bg-gray-50 rounded-lg p-2 text-left border border-gray-100 shrink-0">
                                      <div className="flex items-start justify-between gap-2 mt-0.5">
-                                         <p className="text-xs text-gray-800 leading-snug font-medium mt-0.5">
+                                         <p className="text-[10px] text-gray-800 leading-snug font-medium mt-0.5">
                                             {highlightWord(currentWord.example, currentWord.en)}
                                          </p>
                                          <button 
                                             onClick={(e) => { e.stopPropagation(); playAudio(currentWord.example || ''); }}
                                             className="text-gray-400 hover:text-black transition-colors shrink-0"
                                          >
-                                            <Volume2 size={14} />
+                                            <Volume2 size={12} />
                                          </button>
                                      </div>
                                      <p className="text-gray-500 text-[10px] mt-1">
@@ -438,14 +526,14 @@ const Flashcards: React.FC<FlashcardsProps> = ({ words, onExit, onSwitchMode }) 
                             )}
 
                             {/* 笔记区域 */}
-                            <div className="w-full mt-auto pt-2 pb-1">
+                            <div className="w-full mt-auto pt-1 pb-1">
                                 {isEditingNote ? (
                                     <div className="relative animate-fade-in" onClick={e => e.stopPropagation()}>
                                         <textarea
                                             value={noteInput}
                                             onChange={(e) => setNoteInput(e.target.value)}
-                                            placeholder="写下你的理解、联想或自己的例句..."
-                                            className="w-full h-20 p-2 text-xs bg-gray-50 border border-black rounded-lg outline-none resize-none text-gray-700"
+                                            placeholder="写下你的理解..."
+                                            className="w-full h-16 p-2 text-xs bg-gray-50 border border-black rounded-lg outline-none resize-none text-gray-700"
                                             autoFocus
                                         />
                                         <div className="flex justify-end mt-1">
@@ -468,17 +556,17 @@ const Flashcards: React.FC<FlashcardsProps> = ({ words, onExit, onSwitchMode }) 
                                                     <PenLine size={10} className="text-yellow-600" />
                                                     <span className="text-[10px] font-bold text-yellow-600">笔记</span>
                                                 </div>
-                                                <p className="text-xs text-gray-700 whitespace-pre-wrap">{currentNote}</p>
-                                                <button className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                     <PenLine size={12} className="text-gray-400" />
+                                                <p className="text-[10px] text-gray-700 whitespace-pre-wrap leading-tight">{currentNote}</p>
+                                                <button className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                     <PenLine size={10} className="text-gray-400" />
                                                 </button>
                                             </div>
                                         ) : (
                                             <button 
                                                 onClick={() => setIsEditingNote(true)}
-                                                className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-50 rounded-full text-xs text-gray-500 hover:bg-gray-100 hover:text-black transition-colors border border-gray-100"
+                                                className="flex items-center gap-1.5 px-3 py-1 bg-gray-50 rounded-full text-[10px] text-gray-500 hover:bg-gray-100 hover:text-black transition-colors border border-gray-100"
                                             >
-                                                <PenLine size={12} />
+                                                <PenLine size={10} />
                                                 <span className="font-bold">记笔记</span>
                                             </button>
                                         )}
@@ -492,7 +580,7 @@ const Flashcards: React.FC<FlashcardsProps> = ({ words, onExit, onSwitchMode }) 
         </div>
 
         {/* 底部导航按钮区域 - 限制宽度 */}
-        <div className="flex items-center justify-between gap-3 w-full max-w-sm mx-auto">
+        <div className="flex items-center justify-between gap-3 w-full max-w-[280px] mx-auto">
              <button 
                 onClick={handlePrev}
                 disabled={currentIndex === 0}
