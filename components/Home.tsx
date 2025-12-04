@@ -25,34 +25,52 @@ const Home: React.FC<HomeProps> = ({ onSelectBook, onRegister, isLoggedIn }) => 
   const [loadingCats, setLoadingCats] = useState(true);
   const [loadingBooks, setLoadingBooks] = useState(false);
 
-  // 1. 组件加载时获取分类列表
-  useEffect(() => {
-    const loadCategories = async () => {
-      try {
-        const apiCategories = await fetchCategories();
-        
-        if (apiCategories && apiCategories.length > 0) {
-          setCategories(apiCategories);
-          // 默认选中第一个分类
-          setActiveCategoryId(apiCategories[0].id);
-        } else {
-          // 降级处理：使用模拟数据
-          const mockCats = DEFAULT_CATEGORIES.map((c, i) => ({ id: i + 1, name: c }));
-          setCategories(mockCats);
-          setActiveCategoryId(mockCats[0].id);
-        }
-      } catch (e) {
+  // 定义加载分类的函数，方便复用
+  const loadCategories = async () => {
+    setLoadingCats(true);
+    try {
+      const apiCategories = await fetchCategories();
+      
+      if (apiCategories && apiCategories.length > 0) {
+        setCategories(apiCategories);
+        // 如果当前没有选中分类，或者选中的分类不在新列表中，默认选中第一个
+        // 或者是登录刷新场景，保持当前选中如果存在，不存在则选第一个
+        setActiveCategoryId(prevId => {
+            const exists = apiCategories.find(c => c.id === prevId);
+            return exists ? prevId : apiCategories[0].id;
+        });
+      } else {
+        // 降级处理：使用模拟数据
         const mockCats = DEFAULT_CATEGORIES.map((c, i) => ({ id: i + 1, name: c }));
         setCategories(mockCats);
         setActiveCategoryId(mockCats[0].id);
-      } finally {
-        setLoadingCats(false);
       }
-    };
+    } catch (e) {
+      const mockCats = DEFAULT_CATEGORIES.map((c, i) => ({ id: i + 1, name: c }));
+      setCategories(mockCats);
+      setActiveCategoryId(mockCats[0].id);
+    } finally {
+      setLoadingCats(false);
+    }
+  };
+
+  // 1. 组件加载时获取分类列表
+  useEffect(() => {
     loadCategories();
   }, []);
 
-  // 2. 当选中分类ID变化时，获取该分类下的书籍
+  // 2. 监听登录状态变化，重新加载数据
+  useEffect(() => {
+    if (isLoggedIn) {
+        // 登录成功后刷新分类（从而触发刷新书籍）
+        // 重置状态以显示加载动画，提升用户感知
+        setCategories([]); 
+        setBooks([]);
+        loadCategories();
+    }
+  }, [isLoggedIn]);
+
+  // 3. 当选中分类ID变化时，获取该分类下的书籍
   useEffect(() => {
     const loadBooks = async () => {
         if (activeCategoryId === null) return;
@@ -88,7 +106,7 @@ const Home: React.FC<HomeProps> = ({ onSelectBook, onRegister, isLoggedIn }) => 
     if (categories.length > 0 && activeCategoryId !== null) {
         loadBooks();
     }
-  }, [activeCategoryId, categories]);
+  }, [activeCategoryId, categories]); // 当分类列表更新(如登录后)或选中项改变时触发
 
 
   return (
